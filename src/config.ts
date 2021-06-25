@@ -16,7 +16,7 @@ async function setupDb(db: Db): Promise<void> {
     service: 1,
     productFamily: 1,
     region: 1,
-  });
+  }, { name: 'products_default' });
   db.collection('products').createIndex({
     vendorName: 1,
     service: 1,
@@ -27,7 +27,7 @@ async function setupDb(db: Db): Promise<void> {
     'attributes.operatingSystem': 1,
     'attributes.capacitystatus': 1,
     'attributes.preInstalledSw': 1,
-  });
+  }, { name: 'products_instances' });
   db.collection('products').createIndex({
     vendorName: 1,
     service: 1,
@@ -37,7 +37,7 @@ async function setupDb(db: Db): Promise<void> {
     'attributes.deploymentOption': 1,
     'attributes.databaseEngine': 1,
     'attributes.databaseEdition': 1,
-  });
+  }, { name: 'products_database' });
 }
 
 async function db(): Promise<Db> {
