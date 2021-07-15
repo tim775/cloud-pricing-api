@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import pino from 'pino';
 import { MongoClient, Db } from 'mongodb';
 import NodeCache from 'node-cache';
+import { Pool } from 'pg';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -52,6 +53,18 @@ async function db(): Promise<Db> {
   return client.db();
 }
 
+let pgPool: Pool;
+async function pg(): Promise<Pool> {
+  if (!pgPool) {
+    pgPool = new Pool({
+      connectionString:
+        process.env.POSTGRES_URI ||
+        'postgresql://postgres:my_password@localhost:5432/cloudPricing',
+    });
+  }
+  return pgPool;
+}
+
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
   prettyPrint: process.env.NODE_ENV !== 'production',
@@ -62,6 +75,8 @@ const cache = new NodeCache();
 const config = {
   logger,
   db,
+  pg,
+  productTableName: 'Product',
   cache,
   port: Number(process.env.PORT) || 4000,
   gcpApiKey: process.env.GCP_API_KEY,
