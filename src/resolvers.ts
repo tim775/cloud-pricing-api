@@ -1,9 +1,9 @@
-import _ from 'lodash';
 import { IResolvers } from 'graphql-tools';
 import mingo from 'mingo';
-import config from './config';
+import format from 'pg-format';
 import { Product, Price } from './db/types';
 import currency from './utils/currency';
+import config from './config';
 
 const productLimit = 1000;
 
@@ -14,7 +14,8 @@ type Filter = { [key: string]: string };
 type AttributeFilter = {
   key: string;
   value?: string;
-  valueRegex?: string;
+  // eslint-disable-next-line camelcase
+  value_regex?: string;
 };
 
 interface ProductsArgs {
@@ -44,23 +45,29 @@ const resolvers: IResolvers = {
       _parent: unknown,
       args: ProductsArgs
     ): Promise<Product[]> => {
-      const db = await config.db();
+      const pool = await config.pg();
 
-      const productFilter = transformFilter(
-        <Filter>_.omit(args.filter, 'attributeFilters')
-      );
-      const attributeFilters = transformAttributeFilters(
-        <AttributeFilter[]>args.filter.attributeFilters
+      const { attributeFilters: attribFilters, ...otherFilters } = args.filter;
+
+      const where: string[] = [];
+      Object.entries(otherFilters).forEach((filterItem) => {
+        where.push(filterToCondition(filterItem[0], filterItem[1]));
+      });
+
+      if (attribFilters) {
+        attribFilters.forEach((f) => {
+          where.push(attributeFilterToCondition(f));
+        });
+      }
+
+      const sql = format(
+        `SELECT * FROM %I WHERE ${where.join(' AND ')} LIMIT %L`,
+        config.productTableName,
+        productLimit
       );
 
-      const products = await db
-        .collection('products')
-        .find({
-          ...productFilter,
-          ...attributeFilters,
-        })
-        .limit(productLimit)
-        .toArray();
+      const response = await pool.query(sql);
+      const products = response.rows as Product[];
 
       return products;
     },
@@ -83,6 +90,38 @@ const resolvers: IResolvers = {
   },
 };
 
+function filterToCondition(keyPart: string, value: string): string {
+  const [key, opPart] = keyPart.split('_');
+  if (opPart === 'regex') {
+    const regex = strToRegex(value);
+    return format(`%I ${regex.ignoreCase ? '~*' : '~'} %L`, key, regex.source);
+  }
+  if (value === '') {
+    return format("(%I = '' OR %I IS NULL)", key, key, value);
+  }
+
+  return format('%I = %L', key, value);
+}
+
+function attributeFilterToCondition(filter: AttributeFilter) {
+  if (filter.value_regex) {
+    const regex = strToRegex(filter.value_regex);
+    return format(
+      `attributes ->> %L ${regex.ignoreCase ? '~*' : '~'} %L`,
+      filter.key,
+      regex.source
+    );
+  }
+  if (filter.value === '') {
+    return format(
+      "(attributes -> %L IS NULL OR attributes ->> %L = '')",
+      filter.key,
+      filter.key
+    );
+  }
+  return format('attributes ->> %L = %L', filter.key, filter.value);
+}
+
 function transformFilter(filter: Filter): MongoDbFilter {
   const transformed: MongoDbFilter = {};
   if (!filter) {
@@ -104,19 +143,6 @@ function transformFilter(filter: Filter): MongoDbFilter {
 
     transformed[key] = {};
     transformed[key][op] = value;
-  });
-  return transformed;
-}
-
-function transformAttributeFilters(filters: AttributeFilter[]): MongoDbFilter {
-  const transformed: MongoDbFilter = {};
-  if (!filters) {
-    return transformed;
-  }
-  filters.forEach((filter) => {
-    transformed[`attributes.${filter.key}`] = transformFilter(
-      <Filter>_.omit(filter, 'key')
-    ).value;
   });
   return transformed;
 }
